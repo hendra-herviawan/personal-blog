@@ -1,0 +1,9 @@
+---
+title: "Convert data.table to binary matrix"
+author: "M Hendra Herviawan"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```

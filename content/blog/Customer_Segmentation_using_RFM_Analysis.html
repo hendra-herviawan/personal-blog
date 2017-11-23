@@ -1,0 +1,222 @@
+---
+title: "Customer Segmentation using RFM Analysis"
+author: 'M Hendra Herviawan'
+
+output:
+  html_document:
+    fig_height: 4
+    fig_width: 7
+---
+
+
+
+<div id="m-hendra-herviawan" class="section level2">
+<h2>M Hendra Herviawan</h2>
+</div>
+<div id="project-overview" class="section level2">
+<h2>Project Overview</h2>
+<p>According to wikipedia.org, “RFM is a method used for analyzing customer value”.</p>
+<p>RFM stands for the three dimensions:</p>
+<ul>
+<li>Recency – How recently did the customer purchase?</li>
+<li>Frequency – How often do they purchase?</li>
+<li>Monetary Value – How much do they spend?</li>
+</ul>
+<p>The resulting segments can be ordered from most valuable (highest recency, frequency, and value) to least valuable (lowest recency, frequency, and value). Identifying the most valuable RFM segments can capitalize on chance relationships in the data used for this analysis.</p>
+<pre class="r"><code>library(data.table)
+library(dplyr)
+library(ggplot2)
+#library(stringr)
+#library(DT)
+library(tidyr)
+library(knitr)
+library(rmarkdown)</code></pre>
+<div id="load-dataset" class="section level3">
+<h3>Load Dataset</h3>
+<p>First, Lets we Load &amp; Examine Dataset</p>
+<pre class="r"><code>df_data &lt;- fread(&#39;zcat /home/x/Documents/Kaggle/ecommerce-data/input/data.csv.zip&#39;)
+glimpse(df_data)</code></pre>
+<pre><code>## Observations: 541,909
+## Variables: 8
+## $ InvoiceNo   &lt;chr&gt; &quot;536365&quot;, &quot;536365&quot;, &quot;536365&quot;, &quot;536365&quot;, &quot;536365&quot;, ...
+## $ StockCode   &lt;chr&gt; &quot;85123A&quot;, &quot;71053&quot;, &quot;84406B&quot;, &quot;84029G&quot;, &quot;84029E&quot;, &quot;...
+## $ Description &lt;chr&gt; &quot;WHITE HANGING HEART T-LIGHT HOLDER&quot;, &quot;WHITE METAL...
+## $ Quantity    &lt;int&gt; 6, 6, 8, 6, 6, 2, 6, 6, 6, 32, 6, 6, 8, 6, 6, 3, 2...
+## $ InvoiceDate &lt;chr&gt; &quot;12/1/2010 8:26&quot;, &quot;12/1/2010 8:26&quot;, &quot;12/1/2010 8:2...
+## $ UnitPrice   &lt;dbl&gt; 2.55, 3.39, 2.75, 3.39, 3.39, 7.65, 4.25, 1.85, 1....
+## $ CustomerID  &lt;int&gt; 17850, 17850, 17850, 17850, 17850, 17850, 17850, 1...
+## $ Country     &lt;chr&gt; &quot;United Kingdom&quot;, &quot;United Kingdom&quot;, &quot;United Kingdo...</code></pre>
+</div>
+<div id="data-cleaning" class="section level3">
+<h3>Data Cleaning</h3>
+<p>Delete all negative Quantity and Price. We also need to delete NA customer ID</p>
+<pre class="r"><code>df_data &lt;- df_data %&gt;% 
+  mutate(Quantity = replace(Quantity, Quantity&lt;=0, NA),
+         UnitPrice = replace(UnitPrice, UnitPrice&lt;=0, NA))
+
+df_data &lt;- df_data %&gt;%
+  drop_na()</code></pre>
+</div>
+<div id="recode-variables" class="section level3">
+<h3>Recode variables</h3>
+<p>We should do some recoding and convert character variables to factors.</p>
+<pre class="r"><code>df_data &lt;- df_data %&gt;% 
+  mutate(InvoiceNo=as.factor(InvoiceNo), StockCode=as.factor(StockCode), 
+         InvoiceDate=as.Date(InvoiceDate, &#39;%m/%d/%Y %H:%M&#39;), CustomerID=as.factor(CustomerID), 
+         Country=as.factor(Country))
+
+df_data &lt;- df_data %&gt;% 
+  mutate(total_dolar = Quantity*UnitPrice)
+
+glimpse(df_data)</code></pre>
+<pre><code>## Observations: 397,884
+## Variables: 9
+## $ InvoiceNo   &lt;fctr&gt; 536365, 536365, 536365, 536365, 536365, 536365, 5...
+## $ StockCode   &lt;fctr&gt; 85123A, 71053, 84406B, 84029G, 84029E, 22752, 217...
+## $ Description &lt;chr&gt; &quot;WHITE HANGING HEART T-LIGHT HOLDER&quot;, &quot;WHITE METAL...
+## $ Quantity    &lt;int&gt; 6, 6, 8, 6, 6, 2, 6, 6, 6, 32, 6, 6, 8, 6, 6, 3, 2...
+## $ InvoiceDate &lt;date&gt; 2010-12-01, 2010-12-01, 2010-12-01, 2010-12-01, 2...
+## $ UnitPrice   &lt;dbl&gt; 2.55, 3.39, 2.75, 3.39, 3.39, 7.65, 4.25, 1.85, 1....
+## $ CustomerID  &lt;fctr&gt; 17850, 17850, 17850, 17850, 17850, 17850, 17850, ...
+## $ Country     &lt;fctr&gt; United Kingdom, United Kingdom, United Kingdom, U...
+## $ total_dolar &lt;dbl&gt; 15.30, 20.34, 22.00, 20.34, 20.34, 15.30, 25.50, 1...</code></pre>
+</div>
+<div id="calculate-rfm" class="section level3 tabset">
+<h3>Calculate RFM</h3>
+<p>To implement the RFM analysis, we need to further process the data set in by the following steps:</p>
+<ol style="list-style-type: decimal">
+<li>Find the most recent date for each ID and calculate the days to the now or some other date, to get the Recency data</li>
+<li>Calculate the quantity of translations of a customer, to get the Frequency data</li>
+<li>Sum the amount of money a customer spent and divide it by Frequency, to get the amount per transaction on average, that is the Monetary data.</li>
+</ol>
+<pre class="r"><code>df_RFM &lt;- df_data %&gt;% 
+  group_by(CustomerID) %&gt;% 
+  summarise(recency=as.numeric(as.Date(&quot;2012-01-01&quot;)-max(InvoiceDate)),
+            frequenci=n_distinct(InvoiceNo), monitery= sum(total_dolar)/n_distinct(InvoiceNo)) 
+
+summary(df_RFM)
+
+kable(head(df_RFM))</code></pre>
+<pre><code>##    CustomerID      recency        frequenci          monitery       
+##  12346  :   1   Min.   : 23.0   Min.   :  1.000   Min.   :    3.45  
+##  12347  :   1   1st Qu.: 40.0   1st Qu.:  1.000   1st Qu.:  178.62  
+##  12348  :   1   Median : 73.0   Median :  2.000   Median :  293.90  
+##  12349  :   1   Mean   :115.1   Mean   :  4.272   Mean   :  419.17  
+##  12350  :   1   3rd Qu.:164.8   3rd Qu.:  5.000   3rd Qu.:  430.11  
+##  12352  :   1   Max.   :396.0   Max.   :209.000   Max.   :84236.25  
+##  (Other):4332</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">CustomerID</th>
+<th align="right">recency</th>
+<th align="right">frequenci</th>
+<th align="right">monitery</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">12346</td>
+<td align="right">348</td>
+<td align="right">1</td>
+<td align="right">77183.6000</td>
+</tr>
+<tr class="even">
+<td align="left">12347</td>
+<td align="right">25</td>
+<td align="right">7</td>
+<td align="right">615.7143</td>
+</tr>
+<tr class="odd">
+<td align="left">12348</td>
+<td align="right">98</td>
+<td align="right">4</td>
+<td align="right">449.3100</td>
+</tr>
+<tr class="even">
+<td align="left">12349</td>
+<td align="right">41</td>
+<td align="right">1</td>
+<td align="right">1757.5500</td>
+</tr>
+<tr class="odd">
+<td align="left">12350</td>
+<td align="right">333</td>
+<td align="right">1</td>
+<td align="right">334.4000</td>
+</tr>
+<tr class="even">
+<td align="left">12352</td>
+<td align="right">59</td>
+<td align="right">8</td>
+<td align="right">313.2550</td>
+</tr>
+</tbody>
+</table>
+<div id="recency" class="section level4">
+<h4>Recency</h4>
+<p>Recency – How recently did the customer purchase?</p>
+<pre class="r"><code>hist(df_RFM$recency)</code></pre>
+<p><img src="/blog/Customer_Segmentation_using_RFM_Analysis_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+</div>
+<div id="frequency" class="section level4">
+<h4>Frequency</h4>
+<p>Frequency – How often do they purchase?</p>
+<pre class="r"><code>hist(df_RFM$frequenci, breaks = 50)</code></pre>
+<p><img src="/blog/Customer_Segmentation_using_RFM_Analysis_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="monetary" class="section level4">
+<h4>Monetary</h4>
+<p>Monetary Value – How much do they spend?</p>
+<pre class="r"><code>hist(df_RFM$monitery, breaks = 50)</code></pre>
+<p><img src="/blog/Customer_Segmentation_using_RFM_Analysis_files/figure-html/unnamed-chunk-8-1.png" width="672" /> Becouse the data is realy skewed, we use log scale to normalize</p>
+<pre class="r"><code>df_RFM$monitery &lt;- log(df_RFM$monitery)
+hist(df_RFM$monitery)</code></pre>
+<p><img src="/blog/Customer_Segmentation_using_RFM_Analysis_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+</div>
+</div>
+<div id="clustering" class="section level3">
+<h3>Clustering</h3>
+<pre class="r"><code>df_RFM2 &lt;- df_RFM
+row.names(df_RFM2) &lt;- df_RFM2$CustomerID</code></pre>
+<pre><code>## Warning: Setting row names on a tibble is deprecated.</code></pre>
+<pre class="r"><code>df_RFM2$CustomerID &lt;- NULL
+
+df_RFM2 &lt;- scale(df_RFM2)
+summary(df_RFM2)</code></pre>
+<pre><code>##     recency          frequenci           monitery      
+##  Min.   :-0.9205   Min.   :-0.42505   Min.   :-5.8832  
+##  1st Qu.:-0.7505   1st Qu.:-0.42505   1st Qu.:-0.6153  
+##  Median :-0.4205   Median :-0.29514   Median : 0.0493  
+##  Mean   : 0.0000   Mean   : 0.00000   Mean   : 0.0000  
+##  3rd Qu.: 0.4968   3rd Qu.: 0.09457   3rd Qu.: 0.5576  
+##  Max.   : 2.8091   Max.   :26.59496   Max.   : 7.6012</code></pre>
+<pre class="r"><code>d &lt;- dist(df_RFM2)
+c &lt;- hclust(d, method = &#39;ward.D2&#39;)
+
+plot(c)</code></pre>
+<p><img src="/blog/Customer_Segmentation_using_RFM_Analysis_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+<div id="cut" class="section level4">
+<h4>Cut</h4>
+<pre class="r"><code>members &lt;- cutree(c,k = 8)
+
+members[1:5]</code></pre>
+<pre><code>## 12346 12347 12348 12349 12350 
+##     1     2     2     1     3</code></pre>
+<pre class="r"><code>table(members)</code></pre>
+<pre><code>## members
+##    1    2    3    4    5    6    7    8 
+##  255 1878  368  404 1092  319    2   20</code></pre>
+<pre class="r"><code>aggregate(df_RFM[,2:4], by=list(members), mean)</code></pre>
+<pre><code>##   Group.1   recency  frequenci monitery
+## 1       1  64.56078   5.729412 7.148281
+## 2       2  90.12886   3.185304 5.944782
+## 3       3 323.27989   1.220109 5.920025
+## 4       4 266.67327   1.556931 4.774894
+## 5       5  68.29304   2.924908 4.974036
+## 6       6  36.06897  16.028213 5.711702
+## 7       7  23.50000 205.000000 5.828276
+## 8       8  28.55000  64.700000 6.678910</code></pre>
+</div>
+</div>
+</div>

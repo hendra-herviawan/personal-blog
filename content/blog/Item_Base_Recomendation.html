@@ -1,0 +1,225 @@
+---
+title: "Recomendation system using Item Based Collaboratife Filtering (ICBF) Algorithma"
+author: "M Hendra Herviawan"
+output: html_document
+---
+<div id="m-hendra-herviawan" class="section level2">
+<h2>M Hendra Herviawan</h2>
+</div>
+<div id="project-overview" class="section level2">
+<h2>Project Overview</h2>
+<p>This is a transnational data set which contains all the transactions occurring between 01/12/2010 and 09/12/2011 for a UK-based and registered non-store online retail.The company mainly sells unique all-occasion gifts. Many customers of the company are wholesalers.</p>
+<p>The following libraries were used in this project:</p>
+<pre class="r"><code>#setwd(&quot;~/Documents/Kaggle/ecommerce-data/eda&quot;)
+library(methods)
+library(recommenderlab)
+library(data.table)
+library(ggplot2)
+library(knitr)</code></pre>
+</div>
+<div id="data-pre-preprocessing" class="section level2">
+<h2>Data Pre-preprocessing</h2>
+<p>Some pre-processing of the data available is required before creating the recommendation system.</p>
+<pre class="r"><code>df_data &lt;- fread(&#39;zcat ~/Documents/Kaggle/ecommerce-data/input/data.csv.zip&#39;)
+df_data[ ,InvoiceDate := as.Date(InvoiceDate)]</code></pre>
+<div id="data-imputation" class="section level4">
+<h4>Data Imputation</h4>
+<p>There is negatif Quantity &amp; Unit Price, also NULL/NA Customer ID. We will delete all the NA Row</p>
+<pre class="r"><code>df_data[Quantity&lt;=0,Quantity:=NA]
+df_data[UnitPrice&lt;=0,UnitPrice:=NA]
+df_data &lt;- na.omit(df_data)</code></pre>
+</div>
+<div id="item-dictionary" class="section level4">
+<h4>Item Dictionary</h4>
+<p>Create a Item Dictionary which allows an easy search of a Item name by any of its StockCode</p>
+<pre class="r"><code>setkeyv(df_data, c(&#39;StockCode&#39;, &#39;Description&#39;))
+itemCode &lt;- unique(df_data[, c(&#39;StockCode&#39;, &#39;Description&#39;)])
+setkeyv(df_data, NULL)</code></pre>
+</div>
+<div id="convert-from-long-fromat-to-wide-format" class="section level4">
+<h4>Convert from long fromat to wide format</h4>
+<p>Convert from transactional to binary metrix, 0 for no transaction and vice versa</p>
+<pre class="r"><code>df_train_ori &lt;- dcast(df_data, CustomerID ~ StockCode, 
+                      value.var = &#39;Quantity&#39;,fun.aggregate = sum, fill=0)
+
+CustomerId &lt;- df_train_ori[,1] #!
+
+df_train_ori &lt;- df_train_ori[,-c(1,3504:3508)]
+
+#Fill NA with 0
+for (i in names(df_train_ori))
+ df_train_ori[is.na(get(i)), (i):=0]</code></pre>
+</div>
+<div id="convert-wide-format-to-sparse-matrix" class="section level4">
+<h4>Convert Wide Format to sparse matrix</h4>
+<p>In order to use the ratings data for building a recommendation engine with recommenderlab, I convert buying matrix into a sparse matrix of type realRatingMatrix.</p>
+<pre class="r"><code>df_train &lt;- as(df_train_ori, &#39;matrix&#39;)
+df_train &lt;- df_train[rowSums(df_train) &gt; 5,colSums(df_train) &gt; 5] 
+df_train &lt;- binarize(as(df_train, &quot;realRatingMatrix&quot;), minRatin = 1)</code></pre>
+</div>
+</div>
+<div id="training" class="section level2">
+<h2>Training</h2>
+<p>We will use Item Base Collaboratife Filtering or IBCF. Jaccard is used becouse our data is binary</p>
+<div id="split-dataset" class="section level4">
+<h4>Split Dataset</h4>
+<p>Dataset is split Randomly with 80% for training and 20% for test</p>
+<pre class="r"><code>which_train &lt;- sample(x = c(TRUE, FALSE), size = nrow(df_train),
+                      replace = TRUE, prob = c(0.8, 0.2))
+y &lt;- df_train[!which_train]
+x &lt;- df_train[which_train]</code></pre>
+</div>
+<div id="training-parameter" class="section level4">
+<h4>Training parameter</h4>
+<p>Let’s have a look at the default parameters of IBCF model. Here, k is the number of items to compute the similarities among them in the first step. After, for each item, the algorithm identifies its k most similar items and stores the number. method is a similarity funtion, which is Cosine by default, may also be pearson. I create the model using the default parameters of method = Cosine and k=30.</p>
+<pre class="r"><code>recommender_models &lt;- recommenderRegistry$get_entries(dataType =&quot;binaryRatingMatrix&quot;)
+recommender_models$IBCF_binaryRatingMatrix$parameters</code></pre>
+<pre><code>## $k
+## [1] 30
+## 
+## $method
+## [1] &quot;Jaccard&quot;
+## 
+## $normalize_sim_matrix
+## [1] FALSE
+## 
+## $alpha
+## [1] 0.5</code></pre>
+</div>
+<div id="training-dataset" class="section level4">
+<h4>Training Dataset</h4>
+<pre class="r"><code>method &lt;- &#39;IBCF&#39;
+parameter &lt;- list(method = &#39;Jaccard&#39;)
+n_recommended &lt;- 5
+n_training &lt;- 1000</code></pre>
+<pre class="r"><code>recc_model &lt;- Recommender(data = x, method = method, parameter = parameter)
+model_details &lt;- getModel(recc_model)</code></pre>
+</div>
+</div>
+<div id="predict" class="section level2">
+<h2>Predict</h2>
+<p>Test Dataset is split randomly, We only use 20% for test.Return value of prediction is top-N-List of recommendation item for each user in test dataset.</p>
+<pre class="r"><code>recc_predicted &lt;-predict(object = recc_model, newdata=y,n = n_recommended, type=&quot;topNList&quot;)</code></pre>
+<div id="recomendation-for" class="section level4">
+<h4>Recomendation for</h4>
+<p>Recomendation item for first 5 user in training dataset</p>
+<pre class="r"><code>as(recc_predicted,&quot;list&quot;)[1:5]</code></pre>
+<pre><code>## $`1`
+## [1] &quot;22431&quot; &quot;20724&quot; &quot;23204&quot; &quot;20723&quot; &quot;22355&quot;
+## 
+## $`5`
+## [1] &quot;85040B&quot; &quot;23170&quot;  &quot;23171&quot;  &quot;22059&quot;  &quot;23173&quot; 
+## 
+## $`18`
+## [1] &quot;20724&quot;  &quot;84997B&quot; &quot;23199&quot;  &quot;23204&quot;  &quot;84997A&quot;
+## 
+## $`19`
+## [1] &quot;22274&quot;  &quot;21669&quot;  &quot;22913&quot;  &quot;22533&quot;  &quot;84912B&quot;
+## 
+## $`21`
+## [1] &quot;23200&quot;  &quot;85132A&quot; &quot;23203&quot;  &quot;23202&quot;  &quot;22536&quot;</code></pre>
+<pre class="r"><code>user_1 &lt;- CustomerId[as.integer(names(recc_predicted@items[1]))]</code></pre>
+<p>these are the recommendations for user: 12347</p>
+<pre class="r"><code>vvv &lt;- recc_predicted@items[[1]]
+vvv &lt;- rownames(model_details$sim)[vvv]
+itemCode[vvv]</code></pre>
+<pre><code>##    StockCode                 Description
+## 1:     22431  WATERING CAN BLUE ELEPHANT
+## 2:     20724 RED RETROSPOT CHARLOTTE BAG
+## 3:     23204 CHARLOTTE BAG APPLES DESIGN
+## 4:     20723    STRAWBERRY CHARLOTTE BAG
+## 5:     22355   CHARLOTTE BAG SUKI DESIGN</code></pre>
+</div>
+<div id="compaire-to-actual-purchase" class="section level4">
+<h4>Compaire to actual purchase</h4>
+<p>Bellow is actual purchase of user: 12347. If we look name or description of the goods,Recommendations given are close to the actual purchase.</p>
+<pre class="r"><code>user_1_buy &lt;- df_data[CustomerID==user_1, sum(Quantity), by=StockCode]
+merge(itemCode,user_1_buy, by=&#39;StockCode&#39;)</code></pre>
+<pre><code>##     StockCode                         Description  V1
+##  1:     16008 SMALL FOLDING SCISSOR(POINTED EDGE)  24
+##  2:     17021              NAMASTE SWAGAT INCENSE  36
+##  3:     20665                 RED RETROSPOT PURSE   6
+##  4:     20719              WOODLAND CHARLOTTE BAG  20
+##  5:     20780           BLACK EAR MUFF HEADPHONES  12
+##  6:     20782      CAMOUFLAGE EAR MUFF HEADPHONES   6
+##  7:     21041     RED RETROSPOT OVEN GLOVE DOUBLE   6
+##  8:     21064               BOOM BOX SPEAKER BOYS  30
+##  9:     21171                 BATHROOM METAL SIGN  12
+## 10:     21265        PINK GOOSE FEATHER TREE 60CM  12
+## 11:     21578    WOODLAND DESIGN  COTTON TOTE BAG   6
+## 12:     21731       RED TOADSTOOL LED NIGHT LIGHT  48
+## 13:     21791   VINTAGE HEADS AND TAILS CARD GAME  36
+## 14:     21975      PACK OF 60 DINOSAUR CAKE CASES  48
+## 15:     22195        LARGE HEART MEASURING SPOONS  24
+## 16:     22196        SMALL HEART MEASURING SPOONS  36
+## 17:     22212          FOUR HOOK  WHITE LOVEBIRDS   6
+## 18:     22371        AIRLINE BAG VINTAGE TOKYO 78  20
+## 19:     22372  AIRLINE BAG VINTAGE WORLD CHAMPION   4
+## 20:     22374     AIRLINE BAG VINTAGE JET SET RED   8
+## 21:     22375   AIRLINE BAG VINTAGE JET SET BROWN  16
+## 22:     22376   AIRLINE BAG VINTAGE JET SET WHITE   8
+## 23:     22423            REGENCY CAKESTAND 3 TIER   6
+## 24:     22432             WATERING CAN PINK BUNNY   6
+## 25:     22492              MINI PAINT SET VINTAGE  72
+## 26:     22494             EMERGENCY FIRST AID TIN  12
+## 27:     22497      SET OF 2 TINS VINTAGE BATHROOM   8
+## 28:     22550                    HOLIDAY FUN LUDO   8
+## 29:     22699     ROSES REGENCY TEACUP AND SAUCER   6
+## 30:     22725      ALARM CLOCK BAKELIKE CHOCOLATE   8
+## 31:     22726          ALARM CLOCK BAKELIKE GREEN   4
+## 32:     22727            ALARM CLOCK BAKELIKE RED  20
+## 33:     22728           ALARM CLOCK BAKELIKE PINK   4
+## 34:     22729         ALARM CLOCK BAKELIKE ORANGE   4
+## 35:     22771 CLEAR DRAWER KNOB ACRYLIC EDWARDIAN  12
+## 36:     22772  PINK DRAWER KNOB ACRYLIC EDWARDIAN  12
+## 37:     22773 GREEN DRAWER KNOB ACRYLIC EDWARDIAN  12
+## 38:     22774   RED DRAWER KNOB ACRYLIC EDWARDIAN  24
+## 39:     22775 PURPLE DRAWERKNOB ACRYLIC EDWARDIAN  12
+## 40:     22805  BLUE DRAWER KNOB ACRYLIC EDWARDIAN  12
+## 41:     22821         GIFT BAG PSYCHEDELIC APPLES  12
+## 42:     22992               REVOLVER WOODEN RULER  12
+## 43:     23076          ICE CREAM SUNDAE LIP GLOSS 240
+## 44:     23084                  RABBIT NIGHT LIGHT  36
+## 45:     23146      TRIPLE HOOK ANTIQUE IVORY ROSE   8
+## 46:     23147      SINGLE ANTIQUE ROSE HOOK IVORY  12
+## 47:     23162                REGENCY TEA STRAINER   8
+## 48:     23170             REGENCY TEA PLATE ROSES  12
+## 49:     23171             REGENCY TEA PLATE GREEN  12
+## 50:     23172              REGENCY TEA PLATE PINK  12
+## 51:     23173                REGENCY TEAPOT ROSES   2
+## 52:     23174            REGENCY SUGAR BOWL GREEN   4
+## 53:     23175               REGENCY MILK JUG PINK   8
+## 54:     23177            TREASURE ISLAND BOOK BOX   8
+## 55:     23271 CHRISTMAS TABLE SILVER CANDLE SPIKE  16
+## 56:     23297 SET 40 HEART SHAPE PETIT FOUR CASES  16
+## 57:     23308   SET OF 60 VINTAGE LEAF CAKE CASES  24
+## 58:     23316                 RED REFECTORY CLOCK  12
+## 59:     23497         CLASSIC CHROME BICYCLE BELL  12
+## 60:     23497          CLASSIC CROME BICYCLE BELL  12
+## 61:     23506         MINI PLAYING CARDS SPACEBOY  20
+## 62:     23508       MINI PLAYING CARDS DOLLY GIRL  20
+## 63:     23552         BICYCLE PUNCTURE REPAIR KIT   6
+## 64:    47559B                 TEA TIME OVEN GLOVE  10
+## 65:    51014C              FEATHER PEN,COAL BLACK  12
+## 66:     71477   COLOUR GLASS. STAR T-LIGHT HOLDER  12
+## 67:     71477  COLOURED GLASS STAR T-LIGHT HOLDER  12
+## 68:    84558A        3D DOG PICTURE PLAYING CARDS  78
+## 69:    84559A            3D SHEET OF DOG STICKERS  12
+## 70:    84559B            3D SHEET OF CAT STICKERS  12
+## 71:    84625A  PINK NEW BAROQUECANDLESTICK CANDLE  24
+## 72:     84969  BOX OF 6 ASSORTED COLOUR TEASPOONS   6
+## 73:     84991         60 TEATIME FAIRY CAKE CASES  24
+## 74:     84992      72 SWEETHEART FAIRY CAKE CASES  24
+## 75:    84997B     CHILDRENS CUTLERY RETROSPOT RED   6
+## 76:    84997B   RED 3 PIECE RETROSPOT CUTLERY SET   6
+## 77:    84997C   BLUE 3 PIECE POLKADOT CUTLERY SET   6
+## 78:    84997C     CHILDRENS CUTLERY POLKADOT BLUE   6
+## 79:    84997D     CHILDRENS CUTLERY POLKADOT PINK   6
+## 80:    84997D   PINK 3 PIECE POLKADOT CUTLERY SET   6
+## 81:     85116     BLACK CANDELABRA T-LIGHT HOLDER  12
+## 82:    85167B     BLACK GRAND BAROQUE PHOTO FRAME  30
+## 83:     85178                VICTORIAN SEWING KIT  12
+## 84:    85232D       SET/3 DECOUPAGE STACKING TINS   3
+##     StockCode                         Description  V1</code></pre>
+</div>
+</div>

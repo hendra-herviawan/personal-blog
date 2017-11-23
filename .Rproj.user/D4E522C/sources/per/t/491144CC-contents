@@ -1,0 +1,25 @@
+{{ partial "header.html" . }}
+
+<main class="content" role="main">
+
+  {{ if and .IsHome .Content }}
+  <article class="article">
+    <div class="article-content">
+      {{ .Content }}
+    </div>
+  </article>
+  {{ end }}
+  <!-- Groups content according to content section. The ".Key" in this instance will be the section's title. -->
+  {{ range .Data.Pages.GroupBy "Section"}}
+  <h3>{{ .Key }}</h3>
+  <ul>
+      {{ range .Pages }}
+      <li>
+      <a href="{{ .Permalink }}">{{ .Title }}</a>
+      </li>
+      {{ end }}
+  </ul>
+  {{ end }}
+</main>
+
+{{ partial "footer.html" . }}

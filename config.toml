@@ -1,0 +1,42 @@
+baseurl = "/"
+languageCode = "en-us"
+title = "M Hendra Herviawan~Blog"
+theme = "hugo-lithium-theme"
+googleAnalytics = ""
+disqusShortname = ""
+ignoreFiles = ["\\.Rmd$", "\\.Rmarkdown$", "_files$", "_cache$"]
+
+[permalinks]
+    post = "/:year/:month/:day/:slug/"
+    blog = "/blog/:title/"
+    R = "/tutorial/r/:title/"
+    python = "/tutorial/python/:title/"
+
+[[menu.main]]
+    name = "About"
+    url = "/about/"
+[[menu.main]]
+    name = "Tutorial"
+    url = "/tutorial/"
+[[menu.main]]
+    name = "Kaggle"
+    url = "kaggle.com/hendraherviawan/kernels"
+
+[params]
+    description = "Catatan kecil tentang Data Science"
+
+    # options for highlight.js (version, additional languages, and theme)
+    highlightjsVersion = "9.11.0"
+    highlightjsCDN = "//cdn.bootcss.com"
+    highlightjsLang = ["r", "yaml", "python", "julia"]
+    highlightjsTheme = "github"
+
+    MathJaxCDN = "//cdn.bootcss.com"
+    MathJaxVersion = "2.7.1"
+
+    [params.logo]
+    url = "logo.png"
+    width = 50
+    height = 50
+    alt = "Logo"
+
